@@ -37,7 +37,7 @@ namespace Flexinets.Ipass.ActivationTokenRefreshFunction
                 log.Info("Getting users");
                 using (var db = contextFactory.CreateContext())
                 {
-                    users = await db.Users.Include(o => o.Node).Where(o => o.Status == 1 && o.HostedAuthId != null && o.Activationurldate < DateTime.UtcNow.AddDays(-10)).AsNoTracking().ToListAsync();
+                    users = await db.Users.Include(o => o.Node).Include(o => o.Node.IpassRealms).Where(o => o.Status == 1 && o.HostedAuthId != null && o.Activationurldate < DateTime.UtcNow.AddDays(-10)).AsNoTracking().ToListAsync();
                 }
 
                 _log.Info($"Refreshing {users.Count()} hosted user tokens");
@@ -49,8 +49,16 @@ namespace Flexinets.Ipass.ActivationTokenRefreshFunction
                         log.Info($"Refreshing activation token for {u.UsernameDomain}");
                         using (var db = contextFactory.CreateContext())
                         {
+                            var usernamedomain = u.UsernameDomain;
+                            var groupdomain = u.Node.IpassRealms.SingleOrDefault().Realm;   // For converted users the domains dont necessarily match... use group domain in this case
+                            if (u.Realm != groupdomain)
+                            {
+                                _log.Warn($"User domain {u.Realm} does not match group domain {groupdomain}");
+                                usernamedomain = $"{u.Username}@{groupdomain}";
+                            }
+
                             var user = await db.Users.SingleOrDefaultAsync(o => o.UserId == u.UserId);
-                            var newUrl = await client.RefreshActivationUrl(u.Node.IpassCustomerId.Value, u.UsernameDomain);
+                            var newUrl = await client.RefreshActivationUrl(u.Node.IpassCustomerId.Value, usernamedomain);
                             user.Activationurl = newUrl;
                             user.Activationurldate = DateTime.UtcNow;
                             await db.SaveChangesAsync();
